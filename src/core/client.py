@@ -1,10 +1,12 @@
 import asyncio
 import json
+import time
 from fastapi import HTTPException
 from typing import Optional, AsyncGenerator, Dict, Any
 from openai import AsyncOpenAI, AsyncAzureOpenAI
 from openai.types.chat import ChatCompletion, ChatCompletionChunk
 from openai._exceptions import APIError, RateLimitError, AuthenticationError, BadRequestError
+from src.core.logging import logger
 
 class OpenAIClient:
     """Async OpenAI client with cancellation support."""
@@ -49,6 +51,7 @@ class OpenAIClient:
             cancel_event = asyncio.Event()
             self.active_requests[request_id] = cancel_event
         
+        start_time = time.time()
         try:
             # Create task that can be cancelled
             completion_task = asyncio.create_task(
@@ -80,6 +83,9 @@ class OpenAIClient:
             else:
                 completion = await completion_task
             
+            duration = time.time() - start_time
+            logger.info(f"LLM request completed in {duration:.2f}s (model: {request.get('model')})")
+            
             # Convert to dict format that matches the original interface
             return completion.model_dump()
         
@@ -108,6 +114,8 @@ class OpenAIClient:
             cancel_event = asyncio.Event()
             self.active_requests[request_id] = cancel_event
         
+        start_time = time.time()
+        ttft_logged = False
         try:
             # Ensure stream is enabled
             request["stream"] = True
@@ -119,6 +127,11 @@ class OpenAIClient:
             streaming_completion = await self.client.chat.completions.create(**request)
             
             async for chunk in streaming_completion:
+                if not ttft_logged:
+                    ttft = time.time() - start_time
+                    logger.info(f"LLM stream started (TTFT: {ttft:.2f}s, model: {request.get('model')})")
+                    ttft_logged = True
+
                 # Check for cancellation before yielding each chunk
                 if request_id and request_id in self.active_requests:
                     if self.active_requests[request_id].is_set():
@@ -128,6 +141,9 @@ class OpenAIClient:
                 chunk_dict = chunk.model_dump()
                 chunk_json = json.dumps(chunk_dict, ensure_ascii=False)
                 yield f"data: {chunk_json}"
+            
+            duration = time.time() - start_time
+            logger.info(f"LLM stream completed in {duration:.2f}s (model: {request.get('model')})")
             
             # Signal end of stream
             yield "data: [DONE]"
