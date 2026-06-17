@@ -50,6 +50,9 @@ def convert_claude_to_openai(
         if msg.role == Constants.ROLE_USER:
             openai_message = convert_claude_user_message(msg)
             openai_messages.append(openai_message)
+        elif msg.role == Constants.ROLE_SYSTEM:
+            openai_message = convert_claude_system_message(msg)
+            openai_messages.append(openai_message)
         elif msg.role == Constants.ROLE_ASSISTANT:
             openai_message = convert_claude_assistant_message(msg)
             openai_messages.append(openai_message)
@@ -163,6 +166,23 @@ def convert_claude_user_message(msg: ClaudeMessage) -> Dict[str, Any]:
         return {"role": Constants.ROLE_USER, "content": openai_content[0]["text"]}
     else:
         return {"role": Constants.ROLE_USER, "content": openai_content}
+
+
+def convert_claude_system_message(msg: ClaudeMessage) -> Dict[str, Any]:
+    """Convert Claude system message to OpenAI format."""
+    if msg.content is None:
+        return {"role": Constants.ROLE_SYSTEM, "content": ""}
+
+    if isinstance(msg.content, str):
+        return {"role": Constants.ROLE_SYSTEM, "content": msg.content}
+
+    # Handle list content (similar to user message but for system)
+    text_parts = []
+    for block in msg.content:
+        if block.type == Constants.CONTENT_TEXT:
+            text_parts.append(block.text)
+
+    return {"role": Constants.ROLE_SYSTEM, "content": "\n\n".join(text_parts)}
 
 
 def convert_claude_assistant_message(msg: ClaudeMessage) -> Dict[str, Any]:

@@ -7,7 +7,7 @@ from typing import Optional
 from src.core.config import config
 from src.core.logging import logger
 from src.core.client import OpenAIClient
-from src.models.claude import ClaudeMessagesRequest, ClaudeTokenCountRequest
+from src.models.claude import ClaudeMessagesRequest, ClaudeTokenCountRequest, ClaudeModelsResponse, ClaudeModelInfo
 from src.conversion.request_converter import convert_claude_to_openai
 from src.conversion.response_converter import (
     convert_openai_to_claude_response,
@@ -160,6 +160,39 @@ async def count_tokens(request: ClaudeTokenCountRequest, _: None = Depends(valid
         raise HTTPException(status_code=500, detail=str(e))
 
 
+@router.get("/v1/models")
+async def list_models(_: None = Depends(validate_api_key)):
+    """List available Claude models for discovery"""
+    models = [
+        {
+            "id": "claude-3-5-sonnet-20241022",
+            "display_name": "Claude 3.5 Sonnet",
+            "created": 1729555200,
+        },
+        {
+            "id": "claude-3-5-haiku-20241022",
+            "display_name": "Claude 3.5 Haiku",
+            "created": 1729555200,
+        },
+        {
+            "id": "claude-3-opus-20240229",
+            "display_name": "Claude 3 Opus",
+            "created": 1709164800,
+        },
+        {
+            "id": "claude-3-sonnet-20240229",
+            "display_name": "Claude 3 Sonnet",
+            "created": 1709164800,
+        },
+        {
+            "id": "claude-3-haiku-20240307",
+            "display_name": "Claude 3 Haiku",
+            "created": 1709769600,
+        },
+    ]
+    return {"data": models}
+
+
 @router.get("/health")
 async def health_check():
     """Health check endpoint"""
@@ -227,6 +260,7 @@ async def root():
         },
         "endpoints": {
             "messages": "/v1/messages",
+            "models": "/v1/models",
             "count_tokens": "/v1/messages/count_tokens",
             "health": "/health",
             "test_connection": "/test-connection",

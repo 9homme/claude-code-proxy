@@ -25,7 +25,7 @@ class ClaudeSystemContent(BaseModel):
     text: str
 
 class ClaudeMessage(BaseModel):
-    role: Literal["user", "assistant"]
+    role: Literal["user", "assistant", "system"]
     content: Union[str, List[Union[ClaudeContentBlockText, ClaudeContentBlockImage, ClaudeContentBlockToolUse, ClaudeContentBlockToolResult]]]
 
 class ClaudeTool(BaseModel):
@@ -58,3 +58,11 @@ class ClaudeTokenCountRequest(BaseModel):
     tools: Optional[List[ClaudeTool]] = None
     thinking: Optional[ClaudeThinkingConfig] = None
     tool_choice: Optional[Dict[str, Any]] = None
+
+class ClaudeModelInfo(BaseModel):
+    id: str
+    display_name: str
+    created: int
+
+class ClaudeModelsResponse(BaseModel):
+    data: List[ClaudeModelInfo]

@@ -106,6 +106,28 @@ async def test_with_system_message():
         print(json.dumps(response.json(), indent=2))
 
 
+async def test_system_role_in_messages():
+    """Test with system role inside the messages array."""
+    async with httpx.AsyncClient() as client:
+        response = await client.post(
+            "http://localhost:8082/v1/messages",
+            json={
+                "model": "claude-3-5-sonnet-20241022",
+                "max_tokens": 100,
+                "messages": [
+                    {"role": "user", "content": "Hello"},
+                    {"role": "system", "content": "You are a helpful assistant that always responds in one word."},
+                    {"role": "assistant", "content": "Understood."},
+                    {"role": "user", "content": "What is the capital of France?"}
+                ]
+            }
+        )
+        
+        print("\nSystem role in messages response:")
+        print(json.dumps(response.json(), indent=2))
+        assert response.status_code == 200
+
+
 async def test_multimodal():
     """Test multimodal input (text + image)."""
     async with httpx.AsyncClient() as client:
@@ -239,6 +261,16 @@ async def test_health_and_connection():
         print(json.dumps(connection_response.json(), indent=2))
 
 
+async def test_model_discovery():
+    """Test the model discovery endpoint."""
+    async with httpx.AsyncClient() as client:
+        response = await client.get("http://localhost:8082/v1/models")
+        print("\nModel discovery response:")
+        print(json.dumps(response.json(), indent=2))
+        assert response.status_code == 200
+        assert "data" in response.json()
+
+
 async def main():
     """Run all tests."""
     print("🧪 Testing Claude to OpenAI Proxy")
@@ -246,6 +278,7 @@ async def main():
     
     try:
         await test_health_and_connection()
+        await test_model_discovery()
         await test_token_counting()
         await test_basic_chat()
         await test_with_system_message()
