@@ -79,6 +79,14 @@ class Config:
         
         return custom_headers
 
+    def mask_api_key(self, api_key: str) -> str:
+        """Mask API key for logging"""
+        if not api_key:
+            return "Not set"
+        if len(api_key) <= 8:
+            return "*" * len(api_key)
+        return f"{api_key[:4]}{'*' * (len(api_key) - 8)}{api_key[-4:]}"
+
 try:
     config = Config()
     print(f" Configuration loaded: API_KEY={'*' * 20}..., BASE_URL='{config.openai_base_url}'")
