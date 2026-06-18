@@ -80,6 +80,17 @@ The application automatically loads environment variables from a `.env` file in 
 - `MIDDLE_MODEL` - Model for Claude opus requests (default: `gpt-4o`)
 - `SMALL_MODEL` - Model for Claude haiku requests (default: `gpt-4o-mini`)
 
+**Per-Model Tier Configuration (Advanced):**
+
+- `BIG_MODEL_API_KEY` - API key specifically for Big models
+- `BIG_MODEL_BASE_URL` - Base URL specifically for Big models
+- `MIDDLE_MODEL_API_KEY` - API key specifically for Middle models
+- `MIDDLE_MODEL_BASE_URL` - Base URL specifically for Middle models
+- `SMALL_MODEL_API_KEY` - API key specifically for Small models
+- `SMALL_MODEL_BASE_URL` - Base URL specifically for Small models
+
+*If not set, these will default to the global `OPENAI_API_KEY` and `OPENAI_BASE_URL`.*
+
 **API Configuration:**
 
 - `OPENAI_BASE_URL` - API base URL (default: `https://api.openai.com/v1`)
@@ -194,6 +205,26 @@ OPENAI_BASE_URL="http://localhost:11434/v1"
 BIG_MODEL="llama3.1:70b"
 MIDDLE_MODEL="llama3.1:70b"
 SMALL_MODEL="llama3.1:8b"
+```
+
+#### Per-Model Tier Configuration (Multi-Provider)
+
+You can route different model tiers to different providers:
+
+```bash
+# Global fallback
+OPENAI_API_KEY="sk-global-key"
+OPENAI_BASE_URL="https://api.openai.com/v1"
+
+# Route Big models (Opus) to a specialized provider
+BIG_MODEL_API_KEY="sk-provider-a-key"
+BIG_MODEL_BASE_URL="https://api.provider-a.com/v1"
+BIG_MODEL="qwen-max"
+
+# Route Small models (Haiku) to a faster/cheaper provider
+SMALL_MODEL_API_KEY="sk-provider-b-key"
+SMALL_MODEL_BASE_URL="https://api.provider-b.com/v1"
+SMALL_MODEL="glm-4-flash"
 ```
 
 #### Other Providers
