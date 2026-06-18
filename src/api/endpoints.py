@@ -53,8 +53,8 @@ async def validate_api_key(x_api_key: Optional[str] = Header(None), authorizatio
 @router.post("/v1/messages")
 async def create_message(request: ClaudeMessagesRequest, http_request: Request, _: None = Depends(validate_api_key)):
     try:
-        logger.debug(
-            f"Processing Claude request: model={request.model}, stream={request.stream}"
+        logger.info(
+            f"Received Claude request: model={request.model}, stream={request.stream}"
         )
 
         # Generate unique request ID for cancellation tracking
