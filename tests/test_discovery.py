@@ -7,15 +7,17 @@ sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')
 
 from src.main import app
 
+from src.core.config import config
+
 client = TestClient(app)
 
 def test_list_models():
     """Test the /v1/models endpoint."""
-    # Test without auth (should work if ANTHROPIC_API_KEY is not set, or fail if it is)
-    response = client.get("/v1/models")
-    if response.status_code == 401:
-        # If it requires auth, provide it
-        response = client.get("/v1/models", headers={"x-api-key": "test-key"})
+    headers = {}
+    if config.anthropic_api_key:
+        headers = {"x-api-key": config.anthropic_api_key}
+    
+    response = client.get("/v1/models", headers=headers)
     
     assert response.status_code == 200
     data = response.json()

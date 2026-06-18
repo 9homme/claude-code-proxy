@@ -2,7 +2,7 @@ import asyncio
 import json
 import time
 from fastapi import HTTPException
-from typing import Optional, AsyncGenerator, Dict, Any
+from typing import Optional, AsyncGenerator, Dict, Any, Union, List
 from openai import AsyncOpenAI, AsyncAzureOpenAI
 from openai.types.chat import ChatCompletion, ChatCompletionChunk
 from openai._exceptions import APIError, RateLimitError, AuthenticationError, BadRequestError
@@ -11,39 +11,44 @@ from src.core.logging import logger
 class OpenAIClient:
     """Async OpenAI client with cancellation support."""
     
-    def __init__(self, api_key: str, base_url: str, timeout: int = 90, api_version: Optional[str] = None, custom_headers: Optional[Dict[str, str]] = None):
-        self.api_key = api_key
-        self.base_url = base_url
+    def __init__(self, timeout: int = 90, api_version: Optional[str] = None, custom_headers: Optional[Dict[str, str]] = None):
+        self.timeout = timeout
+        self.api_version = api_version
         self.custom_headers = custom_headers or {}
-        
-        # Prepare default headers
-        default_headers = {
-            "Content-Type": "application/json",
-            "User-Agent": "claude-proxy/1.0.0"
-        }
-        
-        # Merge custom headers with default headers
-        all_headers = {**default_headers, **self.custom_headers}
-        
-        # Detect if using Azure and instantiate the appropriate client
-        if api_version:
-            self.client = AsyncAzureOpenAI(
-                api_key=api_key,
-                azure_endpoint=base_url,
-                api_version=api_version,
-                timeout=timeout,
-                default_headers=all_headers
-            )
-        else:
-            self.client = AsyncOpenAI(
-                api_key=api_key,
-                base_url=base_url,
-                timeout=timeout,
-                default_headers=all_headers
-            )
+        self.clients: Dict[str, Union[AsyncOpenAI, AsyncAzureOpenAI]] = {}
         self.active_requests: Dict[str, asyncio.Event] = {}
     
-    async def create_chat_completion(self, request: Dict[str, Any], request_id: Optional[str] = None) -> Dict[str, Any]:
+    def _get_client(self, api_key: str, base_url: str) -> Union[AsyncOpenAI, AsyncAzureOpenAI]:
+        """Get or create an OpenAI client for the given credentials."""
+        client_key = f"{api_key}:{base_url}"
+        if client_key not in self.clients:
+            # Prepare default headers
+            default_headers = {
+                "Content-Type": "application/json",
+                "User-Agent": "claude-proxy/1.0.0"
+            }
+            
+            # Merge custom headers with default headers
+            all_headers = {**default_headers, **self.custom_headers}
+            
+            if self.api_version:
+                self.clients[client_key] = AsyncAzureOpenAI(
+                    api_key=api_key,
+                    azure_endpoint=base_url,
+                    api_version=self.api_version,
+                    timeout=self.timeout,
+                    default_headers=all_headers
+                )
+            else:
+                self.clients[client_key] = AsyncOpenAI(
+                    api_key=api_key,
+                    base_url=base_url,
+                    timeout=self.timeout,
+                    default_headers=all_headers
+                )
+        return self.clients[client_key]
+
+    async def create_chat_completion(self, request: Dict[str, Any], api_key: str, base_url: str, request_id: Optional[str] = None) -> Dict[str, Any]:
         """Send chat completion to OpenAI API with cancellation support."""
         
         # Create cancellation token if request_id provided
@@ -51,11 +56,12 @@ class OpenAIClient:
             cancel_event = asyncio.Event()
             self.active_requests[request_id] = cancel_event
         
+        client = self._get_client(api_key, base_url)
         start_time = time.time()
         try:
             # Create task that can be cancelled
             completion_task = asyncio.create_task(
-                self.client.chat.completions.create(**request)
+                client.chat.completions.create(**request)
             )
             
             if request_id:
@@ -106,7 +112,7 @@ class OpenAIClient:
             if request_id and request_id in self.active_requests:
                 del self.active_requests[request_id]
     
-    async def create_chat_completion_stream(self, request: Dict[str, Any], request_id: Optional[str] = None) -> AsyncGenerator[str, None]:
+    async def create_chat_completion_stream(self, request: Dict[str, Any], api_key: str, base_url: str, request_id: Optional[str] = None) -> AsyncGenerator[str, None]:
         """Send streaming chat completion to OpenAI API with cancellation support."""
         
         # Create cancellation token if request_id provided
@@ -114,6 +120,7 @@ class OpenAIClient:
             cancel_event = asyncio.Event()
             self.active_requests[request_id] = cancel_event
         
+        client = self._get_client(api_key, base_url)
         start_time = time.time()
         ttft_logged = False
         try:
@@ -124,7 +131,7 @@ class OpenAIClient:
             request["stream_options"]["include_usage"] = True
             
             # Create the streaming completion
-            streaming_completion = await self.client.chat.completions.create(**request)
+            streaming_completion = await client.chat.completions.create(**request)
             
             async for chunk in streaming_completion:
                 if not ttft_logged:

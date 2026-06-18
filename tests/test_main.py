@@ -3,6 +3,7 @@
 import asyncio
 import json
 import httpx
+import os
 from dotenv import load_dotenv
 
 load_dotenv()
@@ -10,7 +11,11 @@ load_dotenv()
 
 async def test_basic_chat():
     """Test basic chat completion."""
-    async with httpx.AsyncClient() as client:
+    auth_headers = {}
+    if os.environ.get("ANTHROPIC_API_KEY"):
+        auth_headers = {"x-api-key": os.environ.get("ANTHROPIC_API_KEY")}
+        
+    async with httpx.AsyncClient(headers=auth_headers, timeout=60.0) as client:
         response = await client.post(
             "http://localhost:8082/v1/messages",
             json={
@@ -28,7 +33,11 @@ async def test_basic_chat():
 
 async def test_streaming_chat():
     """Test streaming chat completion."""
-    async with httpx.AsyncClient() as client:
+    auth_headers = {}
+    if os.environ.get("ANTHROPIC_API_KEY"):
+        auth_headers = {"x-api-key": os.environ.get("ANTHROPIC_API_KEY")}
+        
+    async with httpx.AsyncClient(headers=auth_headers, timeout=60.0) as client:
         async with client.stream(
             "POST",
             "http://localhost:8082/v1/messages",
@@ -49,7 +58,11 @@ async def test_streaming_chat():
 
 async def test_function_calling():
     """Test function calling capability."""
-    async with httpx.AsyncClient() as client:
+    auth_headers = {}
+    if os.environ.get("ANTHROPIC_API_KEY"):
+        auth_headers = {"x-api-key": os.environ.get("ANTHROPIC_API_KEY")}
+        
+    async with httpx.AsyncClient(headers=auth_headers, timeout=60.0) as client:
         response = await client.post(
             "http://localhost:8082/v1/messages",
             json={
@@ -89,7 +102,11 @@ async def test_function_calling():
 
 async def test_with_system_message():
     """Test with system message."""
-    async with httpx.AsyncClient() as client:
+    auth_headers = {}
+    if os.environ.get("ANTHROPIC_API_KEY"):
+        auth_headers = {"x-api-key": os.environ.get("ANTHROPIC_API_KEY")}
+        
+    async with httpx.AsyncClient(headers=auth_headers, timeout=60.0) as client:
         response = await client.post(
             "http://localhost:8082/v1/messages",
             json={
@@ -108,7 +125,11 @@ async def test_with_system_message():
 
 async def test_system_role_in_messages():
     """Test with system role inside the messages array."""
-    async with httpx.AsyncClient() as client:
+    auth_headers = {}
+    if os.environ.get("ANTHROPIC_API_KEY"):
+        auth_headers = {"x-api-key": os.environ.get("ANTHROPIC_API_KEY")}
+        
+    async with httpx.AsyncClient(headers=auth_headers, timeout=60.0) as client:
         response = await client.post(
             "http://localhost:8082/v1/messages",
             json={
@@ -130,7 +151,11 @@ async def test_system_role_in_messages():
 
 async def test_multimodal():
     """Test multimodal input (text + image)."""
-    async with httpx.AsyncClient() as client:
+    auth_headers = {}
+    if os.environ.get("ANTHROPIC_API_KEY"):
+        auth_headers = {"x-api-key": os.environ.get("ANTHROPIC_API_KEY")}
+        
+    async with httpx.AsyncClient(headers=auth_headers, timeout=60.0) as client:
         # Sample base64 image (1x1 pixel transparent PNG)
         sample_image = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChAI9jU8PJAAAAASUVORK5CYII="
         
@@ -164,7 +189,11 @@ async def test_multimodal():
 
 async def test_conversation_with_tool_use():
     """Test a complete conversation with tool use and results."""
-    async with httpx.AsyncClient() as client:
+    auth_headers = {}
+    if os.environ.get("ANTHROPIC_API_KEY"):
+        auth_headers = {"x-api-key": os.environ.get("ANTHROPIC_API_KEY")}
+        
+    async with httpx.AsyncClient(headers=auth_headers, timeout=60.0) as client:
         # First message with tool call
         response1 = await client.post(
             "http://localhost:8082/v1/messages",
@@ -232,7 +261,11 @@ async def test_conversation_with_tool_use():
 
 async def test_token_counting():
     """Test token counting endpoint."""
-    async with httpx.AsyncClient() as client:
+    auth_headers = {}
+    if os.environ.get("ANTHROPIC_API_KEY"):
+        auth_headers = {"x-api-key": os.environ.get("ANTHROPIC_API_KEY")}
+        
+    async with httpx.AsyncClient(headers=auth_headers, timeout=60.0) as client:
         response = await client.post(
             "http://localhost:8082/v1/messages/count_tokens",
             json={
@@ -249,7 +282,11 @@ async def test_token_counting():
 
 async def test_health_and_connection():
     """Test health and connection endpoints."""
-    async with httpx.AsyncClient() as client:
+    auth_headers = {}
+    if os.environ.get("ANTHROPIC_API_KEY"):
+        auth_headers = {"x-api-key": os.environ.get("ANTHROPIC_API_KEY")}
+        
+    async with httpx.AsyncClient(headers=auth_headers, timeout=60.0) as client:
         # Health check
         health_response = await client.get("http://localhost:8082/health")
         print("\nHealth check:")
@@ -263,7 +300,11 @@ async def test_health_and_connection():
 
 async def test_model_discovery():
     """Test the model discovery endpoint."""
-    async with httpx.AsyncClient() as client:
+    auth_headers = {}
+    if os.environ.get("ANTHROPIC_API_KEY"):
+        auth_headers = {"x-api-key": os.environ.get("ANTHROPIC_API_KEY")}
+        
+    async with httpx.AsyncClient(headers=auth_headers, timeout=60.0) as client:
         response = await client.get("http://localhost:8082/v1/models")
         print("\nModel discovery response:")
         print(json.dumps(response.json(), indent=2))

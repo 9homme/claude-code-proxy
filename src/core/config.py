@@ -25,10 +25,20 @@ class Config:
         self.request_timeout = int(os.environ.get("REQUEST_TIMEOUT", "90"))
         self.max_retries = int(os.environ.get("MAX_RETRIES", "2"))
         
-        # Model settings - BIG and SMALL models
+        # Model settings - BIG, MIDDLE and SMALL models
         self.big_model = os.environ.get("BIG_MODEL", "gpt-4o")
         self.middle_model = os.environ.get("MIDDLE_MODEL", self.big_model)
         self.small_model = os.environ.get("SMALL_MODEL", "gpt-4o-mini")
+        
+        # Per-model configuration
+        self.big_model_api_key = os.environ.get("BIG_MODEL_API_KEY", self.openai_api_key)
+        self.big_model_base_url = os.environ.get("BIG_MODEL_BASE_URL", self.openai_base_url)
+        
+        self.middle_model_api_key = os.environ.get("MIDDLE_MODEL_API_KEY", self.openai_api_key)
+        self.middle_model_base_url = os.environ.get("MIDDLE_MODEL_BASE_URL", self.openai_base_url)
+        
+        self.small_model_api_key = os.environ.get("SMALL_MODEL_API_KEY", self.openai_api_key)
+        self.small_model_base_url = os.environ.get("SMALL_MODEL_BASE_URL", self.openai_base_url)
         
     def validate_api_key(self):
         """Basic API key validation"""

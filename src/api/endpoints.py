@@ -21,9 +21,7 @@ router = APIRouter()
 custom_headers = config.get_custom_headers()
 
 openai_client = OpenAIClient(
-    config.openai_api_key,
-    config.openai_base_url,
-    config.request_timeout,
+    timeout=config.request_timeout,
     api_version=config.azure_api_version,
     custom_headers=custom_headers,
 )
@@ -60,6 +58,9 @@ async def create_message(request: ClaudeMessagesRequest, http_request: Request, 
         # Generate unique request ID for cancellation tracking
         request_id = str(uuid.uuid4())
 
+        # Get model-specific configuration
+        openai_model, api_key, base_url = model_manager.get_model_config(request.model)
+
         # Convert Claude request to OpenAI format
         openai_request = convert_claude_to_openai(request, model_manager)
 
@@ -71,7 +72,7 @@ async def create_message(request: ClaudeMessagesRequest, http_request: Request, 
             # Streaming response - wrap in error handling
             try:
                 openai_stream = openai_client.create_chat_completion_stream(
-                    openai_request, request_id
+                    openai_request, api_key, base_url, request_id
                 )
                 return StreamingResponse(
                     convert_openai_streaming_to_claude_with_cancellation(
@@ -105,7 +106,7 @@ async def create_message(request: ClaudeMessagesRequest, http_request: Request, 
         else:
             # Non-streaming response
             openai_response = await openai_client.create_chat_completion(
-                openai_request, request_id
+                openai_request, api_key, base_url, request_id
             )
             claude_response = convert_openai_to_claude_response(
                 openai_response, request
@@ -210,18 +211,21 @@ async def test_connection():
     """Test API connectivity to OpenAI"""
     try:
         # Simple test request to verify API connectivity
+        openai_model, api_key, base_url = model_manager.get_model_config(config.small_model)
         test_response = await openai_client.create_chat_completion(
             {
-                "model": config.small_model,
+                "model": openai_model,
                 "messages": [{"role": "user", "content": "Hello"}],
                 "max_tokens": 5,
-            }
+            },
+            api_key,
+            base_url
         )
 
         return {
             "status": "success",
             "message": "Successfully connected to OpenAI API",
-            "model_used": config.small_model,
+            "model_used": openai_model,
             "timestamp": datetime.now().isoformat(),
             "response_id": test_response.get("id", "unknown"),
         }
@@ -256,6 +260,7 @@ async def root():
             "api_key_configured": bool(config.openai_api_key),
             "client_api_key_validation": bool(config.anthropic_api_key),
             "big_model": config.big_model,
+            "middle_model": config.middle_model,
             "small_model": config.small_model,
         },
         "endpoints": {
