@@ -195,6 +195,7 @@ async def list_models(_: None = Depends(validate_api_key)):
 
 
 @router.get("/health")
+@router.head("/health")
 async def health_check():
     """Health check endpoint"""
     return {
@@ -249,6 +250,7 @@ async def test_connection():
 
 
 @router.get("/")
+@router.head("/")
 async def root():
     """Root endpoint"""
     return {

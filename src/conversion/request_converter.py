@@ -199,6 +199,10 @@ def convert_claude_assistant_message(msg: ClaudeMessage) -> Dict[str, Any]:
     for block in msg.content:
         if block.type == Constants.CONTENT_TEXT:
             text_parts.append(block.text)
+        elif block.type == Constants.CONTENT_THINKING:
+            text_parts.append(f"<thinking>\n{block.thinking}\n</thinking>")
+        elif block.type == Constants.CONTENT_REDACTED_THINKING:
+            text_parts.append(f"<thinking>\n[Redacted Thinking: {block.data}]\n</thinking>")
         elif block.type == Constants.CONTENT_TOOL_USE:
             tool_calls.append(
                 {
