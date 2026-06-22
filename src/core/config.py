@@ -21,9 +21,15 @@ class Config:
         self.max_tokens_limit = int(os.environ.get("MAX_TOKENS_LIMIT", "4096"))
         self.min_tokens_limit = int(os.environ.get("MIN_TOKENS_LIMIT", "100"))
         
-        # Connection settings
         self.request_timeout = int(os.environ.get("REQUEST_TIMEOUT", "90"))
         self.max_retries = int(os.environ.get("MAX_RETRIES", "2"))
+        
+        # Multimodal settings
+        self.strip_images = os.environ.get("STRIP_IMAGES", "false").lower() in ("true", "1", "yes")
+        
+        # Strip images based on model name substring
+        models_str = os.environ.get("STRIP_IMAGE_MODELS", "qwen,deepseek")
+        self.strip_image_models = [m.strip().lower() for m in models_str.split(",") if m.strip()]
         
         # Model settings - BIG, MIDDLE and SMALL models
         self.big_model = os.environ.get("BIG_MODEL", "gpt-4o")
