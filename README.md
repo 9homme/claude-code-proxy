@@ -1,20 +1,41 @@
 # Claude Code Proxy
 
-A proxy server that enables **Claude Code** to work with OpenAI-compatible API providers. Convert Claude API requests to OpenAI API calls, allowing you to use various LLM providers through the Claude Code CLI.
+A proxy server that lets you **mix and match LLM providers** behind a single Claude Code-compatible API. Use your **Claude Code Max subscription** (via the `claude` CLI) for heavy lifting, an **OpenAI API** for medium tasks, and a **local model** (Ollama) for lightweight work — all at the same time, transparently routed by model tier.
 
 ![Claude Code Proxy](demo.png)
+
+## Why this proxy?
+
+Most Claude Code proxies force you to pick **one** backend. This one lets you combine **everything**:
+
+| Tier | What Claude Code sends | Example backend |
+|------|----------------------|-----------------|
+| **BIG** (opus) | Complex reasoning, architecture | 🟣 **Claude Code Max** via CLI (`opus`) |
+| **MIDDLE** (sonnet) | General coding, refactoring | 🔵 **OpenAI** (`gpt-4o`) or **DeepSeek** |
+| **SMALL** (haiku) | Quick lookups, completions | 🟢 **Local Ollama** (`llama3.1:8b`) or **GLM-4-Flash** |
+
+**One proxy, three providers, zero code changes.** Claude Code just talks to `localhost:8082` and the proxy routes each request to the right backend automatically.
+
+### What makes it special
+
+- 🎯 **Per-tier provider routing** — Each tier (BIG/MIDDLE/SMALL) independently selects between `openai` (any OpenAI-compatible API) or `claude-cli` (your Claude Code Max subscription)
+- 💰 **Maximize your subscriptions** — Use your Claude Code Max plan for opus-tier heavy reasoning while cheaper/faster providers handle the rest
+- 🔌 **Any OpenAI-compatible provider** — OpenAI, Azure, DeepSeek, GLM, Ollama, vLLM, LiteLLM, and more
+- 🟣 **Claude CLI integration** — Run `claude -p --model opus` under the hood; OAuth auth handled automatically
+- 📡 **Full streaming support** — Real-time SSE streaming for both CLI and API backends
+- 🛡️ **Anthropic-compatible errors** — Session limits return proper `rate_limit_error` (429) so Claude Code handles them gracefully
+- 🔧 **Zero-code switching** — Change backends purely via environment variables; no code changes needed
 
 ## Features
 
 - **Full Claude API Compatibility**: Complete `/v1/messages` endpoint support
-- **Multiple Provider Support**: OpenAI, Azure OpenAI, local models (Ollama), and any OpenAI-compatible API
-- **Claude Code CLI Backend**: Use your Claude Code Max subscription side-by-side with other providers — configure each tier (BIG/MIDDLE/SMALL) independently
-- **Smart Model Mapping**: Configure BIG and SMALL models via environment variables
+- **Mixed Provider Routing**: Combine Claude Code CLI + OpenAI + local models simultaneously
+- **Smart Model Mapping**: Configure BIG, MIDDLE, and SMALL models via environment variables
 - **Function Calling**: Complete tool use support with proper conversion
-- **Streaming Responses**: Real-time SSE streaming support
+- **Streaming Responses**: Real-time SSE streaming support for all backends
 - **Image Support**: Base64 encoded image input
 - **Custom Headers**: Automatic injection of custom HTTP headers for API requests
-- **Error Handling**: Comprehensive error handling and logging
+- **Error Handling**: Comprehensive error handling with Anthropic-style error types
 
 ## Quick Start
 
@@ -58,6 +79,101 @@ ANTHROPIC_BASE_URL=http://localhost:8082 ANTHROPIC_API_KEY="any-value" claude
 # If ANTHROPIC_API_KEY is set in the proxy:
 ANTHROPIC_BASE_URL=http://localhost:8082 ANTHROPIC_API_KEY="exact-matching-key" claude
 ```
+
+## 🎭 Showcase: Mixed Provider Setup
+
+Here's the killer feature — **three different providers running simultaneously** through one proxy:
+
+```bash
+# ┌─────────────────────────────────────────────────────────────────┐
+# │  Claude Code  ──►  Proxy (:8082)  ──►  ┌──────────────────────┐ │
+# │                                        │  BIG   → Claude CLI  │ │
+# │                                        │  MID   → OpenAI API  │ │
+# │                                        │  SMALL → Ollama      │ │
+# │                                        └──────────────────────┘ │
+# └─────────────────────────────────────────────────────────────────┘
+
+# BIG tier: Claude Code Max subscription (opus) for complex reasoning
+BIG_MODEL_PROVIDER="claude-cli"
+BIG_MODEL="opus"
+
+# MIDDLE tier: OpenAI for general coding
+MIDDLE_MODEL_PROVIDER="openai"
+MIDDLE_MODEL="gpt-4o"
+MIDDLE_MODEL_API_KEY="sk-your-openai-key"
+
+# SMALL tier: free local model for quick tasks
+SMALL_MODEL_PROVIDER="openai"
+SMALL_MODEL="qwen2.5-coder:7b"
+SMALL_MODEL_BASE_URL="http://localhost:11434/v1"
+SMALL_MODEL_API_KEY="dummy"
+```
+
+### How routing works
+
+When Claude Code sends a request, the proxy inspects the requested model name and routes automatically:
+
+```
+claude-3-opus-*      → BIG tier    → claude -p --model opus    (your Max subscription)
+claude-*-sonnet-*    → MIDDLE tier → OpenAI API (gpt-4o)
+claude-*-haiku-*     → SMALL tier  → Ollama (qwen2.5-coder:7b)
+```
+
+**You don't need to change anything in Claude Code.** Just point it at the proxy and each request goes to the optimal backend automatically. Use your expensive Claude Max subscription where it matters (opus), cheap APIs for everyday tasks (sonnet→gpt-4o), and free local models for trivial work (haiku→ollama).
+
+### Other popular combinations
+
+<details>
+<summary><b>🔐 Claude Max + DeepSeek + GLM-4-Flash</b></summary>
+
+```bash
+BIG_MODEL_PROVIDER="claude-cli"
+BIG_MODEL="opus"
+
+MIDDLE_MODEL_PROVIDER="openai"
+MIDDLE_MODEL="deepseek-chat"
+MIDDLE_MODEL_API_KEY="sk-deepseek-key"
+MIDDLE_MODEL_BASE_URL="https://api.deepseek.com/v1"
+
+SMALL_MODEL_PROVIDER="openai"
+SMALL_MODEL="glm-4-flash"
+SMALL_MODEL_API_KEY="sk-glm-key"
+SMALL_MODEL_BASE_URL="https://open.bigmodel.cn/api/paas/v4"
+```
+</details>
+
+<details>
+<summary><b>🟣 All-Claude Max (subscription only)</b></summary>
+
+```bash
+BIG_MODEL_PROVIDER="claude-cli"
+BIG_MODEL="opus"
+MIDDLE_MODEL_PROVIDER="claude-cli"
+MIDDLE_MODEL="sonnet"
+SMALL_MODEL_PROVIDER="claude-cli"
+SMALL_MODEL="haiku"
+```
+</details>
+
+<details>
+<summary><b>🌐 LiteLLM gateway + Claude CLI</b></summary>
+
+```bash
+# Route big tasks to Claude Max, everything else through a LiteLLM gateway
+BIG_MODEL_PROVIDER="claude-cli"
+BIG_MODEL="opus"
+
+MIDDLE_MODEL_PROVIDER="openai"
+MIDDLE_MODEL="gpt-4o"
+MIDDLE_MODEL_API_KEY="sk-litellm-key"
+MIDDLE_MODEL_BASE_URL="http://your-litellm-gateway:4000/v1"
+
+SMALL_MODEL_PROVIDER="openai"
+SMALL_MODEL="claude-3-5-haiku"
+SMALL_MODEL_API_KEY="sk-litellm-key"
+SMALL_MODEL_BASE_URL="http://your-litellm-gateway:4000/v1"
+```
+</details>
 
 ## Configuration
 
