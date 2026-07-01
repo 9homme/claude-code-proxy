@@ -395,6 +395,29 @@ Claude CLI backend settings:
 | `CLAUDE_CLI_EXTRA_ARGS` | _empty_ | Comma-separated extra CLI flags |
 | `CLAUDE_CLI_TIMEOUT` | `600` | Per-request timeout in seconds |
 | `CLAUDE_CLI_SKIP_PERMISSIONS` | `true` | Pass `--dangerously-skip-permissions` |
+| `CLAUDE_CLI_ENABLE_TOOLS` | `false` | Enable CLI built-in tools for transparent mode (see below) |
+
+#### CLI Modes: Pure Inference vs Transparent
+
+The CLI backend supports two modes controlled by `CLAUDE_CLI_ENABLE_TOOLS`:
+
+**Pure inference mode** (default, `CLAUDE_CLI_ENABLE_TOOLS=false`):
+- All built-in tools are disabled (`--allowedTools ""`)
+- System prompt is embedded in stdin text
+- Best for: using the CLI as a text-only LLM backend alongside other providers
+
+**Transparent mode** (`CLAUDE_CLI_ENABLE_TOOLS=true`):
+- CLI keeps all built-in tools (Bash, Edit, Read, etc.)
+- System prompt is passed via `--append-system-prompt` (proper system role)
+- Claude Code works seamlessly through the proxy as if calling the real API
+- Best for: full agentic behavior, letting Claude Code use its native tools
+
+```bash
+# Transparent mode — Claude Code works seamlessly via CLI
+BIG_MODEL_PROVIDER="claude-cli"
+BIG_MODEL="opus"
+CLAUDE_CLI_ENABLE_TOOLS="true"
+```
 
 #### Other Providers
 
