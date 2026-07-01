@@ -116,29 +116,38 @@ class ClaudeCliClient:
 
     def _build_system_prompt(self, request: ClaudeMessagesRequest) -> str:
         """Build the complete system prompt including tool descriptions."""
-        base = self._extract_system_prompt(request) or "You are a helpful assistant."
+        base = self._extract_system_prompt(request) or ""
         tools_desc = self._build_tools_description(request)
         if tools_desc:
             return base + tools_desc
         return base
 
-    def _build_conversation_prompt(self, request: ClaudeMessagesRequest) -> str:
+    def _build_conversation_prompt(
+        self, request: ClaudeMessagesRequest, system_prompt: str = ""
+    ) -> str:
         """Flatten Claude messages into a text prompt for the CLI.
 
-        For single-message conversations the text is passed directly.
-        For multi-turn conversations a transcript is formatted so the model
-        understands the full context.
+        The system prompt is prepended to the conversation text so that the
+        entire payload is passed via stdin (avoiding OS argument length limits
+        when system prompts are large). For single-message conversations the
+        text is passed directly; for multi-turn conversations a transcript is
+        formatted so the model understands the full context.
         """
         messages = request.messages
         if not messages:
-            return ""
+            return system_prompt
 
-        # Single user message — pass through directly
+        # Single user message — pass through directly (with system prefix)
         if len(messages) == 1 and messages[0].role == Constants.ROLE_USER:
-            return self._extract_message_text(messages[0])
+            user_text = self._extract_message_text(messages[0])
+            if system_prompt:
+                return f"{system_prompt}\n\n---\n\n{user_text}"
+            return user_text
 
         # Multi-turn: build a labelled transcript
         parts: List[str] = []
+        if system_prompt:
+            parts.append(f"[SYSTEM]\n{system_prompt}")
         for msg in messages:
             role = msg.role.upper()
             text = self._extract_message_text(msg)
@@ -156,9 +165,15 @@ class ClaudeCliClient:
     # ------------------------------------------------------------------
 
     def _build_command(
-        self, model: str, stream: bool, system_prompt: str
+        self, model: str, stream: bool
     ) -> List[str]:
-        """Build the claude CLI command."""
+        """Build the claude CLI command.
+
+        Note: the system prompt is NOT passed via --system-prompt here because
+        large system prompts (common from Claude Code) would exceed OS argument
+        length limits. Instead, the system prompt is embedded into the text
+        that is piped via stdin (see _build_conversation_prompt).
+        """
         cmd: List[str] = [
             self.config.claude_cli_path,
             "-p",
@@ -173,10 +188,6 @@ class ClaudeCliClient:
             ])
         else:
             cmd.extend(["--output-format", "json"])
-
-        # Override the default Claude Code system prompt with ours so the CLI
-        # behaves as a pure inference backend rather than a coding agent.
-        cmd.extend(["--system-prompt", system_prompt])
 
         # Disable all built-in tools — we want pure text inference.
         cmd.extend(["--allowedTools", ""])
@@ -199,9 +210,9 @@ class ClaudeCliClient:
         request_id: Optional[str] = None,
     ) -> dict:
         """Run the CLI in non-streaming mode and return a Claude-format dict."""
-        prompt = self._build_conversation_prompt(request)
         system_prompt = self._build_system_prompt(request)
-        cmd = self._build_command(target.model, stream=False, system_prompt=system_prompt)
+        prompt = self._build_conversation_prompt(request, system_prompt=system_prompt)
+        cmd = self._build_command(target.model, stream=False)
 
         start_time = time.time()
         logger.info(f"Claude CLI request started (model: {target.model})")
@@ -372,9 +383,9 @@ class ClaudeCliClient:
         request_id: Optional[str] = None,
     ) -> AsyncGenerator[str, None]:
         """Run the CLI in streaming mode and yield Claude SSE events."""
-        prompt = self._build_conversation_prompt(request)
         system_prompt = self._build_system_prompt(request)
-        cmd = self._build_command(target.model, stream=True, system_prompt=system_prompt)
+        prompt = self._build_conversation_prompt(request, system_prompt=system_prompt)
+        cmd = self._build_command(target.model, stream=True)
 
         start_time = time.time()
         logger.info(f"Claude CLI stream started (model: {target.model})")

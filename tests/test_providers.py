@@ -223,15 +223,46 @@ def test_build_command_includes_model_and_stream_flags():
     cfg = _make_config({})
     client = ClaudeCliClient(cfg)
 
-    stream_cmd = client._build_command("sonnet", stream=True, system_prompt="hi")
+    stream_cmd = client._build_command("sonnet", stream=True)
     assert "--model" in stream_cmd
     assert "sonnet" in stream_cmd
     assert "--output-format" in stream_cmd
     assert "stream-json" in stream_cmd
 
-    non_stream_cmd = client._build_command("opus", stream=False, system_prompt="hi")
+    non_stream_cmd = client._build_command("opus", stream=False)
     assert "json" in non_stream_cmd
     assert "stream-json" not in non_stream_cmd
+
+
+def test_build_command_no_system_prompt_arg():
+    """The command must NOT pass system prompt via --system-prompt (size limits)."""
+    from src.core.claude_cli_client import ClaudeCliClient
+
+    cfg = _make_config({})
+    client = ClaudeCliClient(cfg)
+    cmd = client._build_command("opus", stream=False)
+    assert "--system-prompt" not in cmd, "System prompt must go via stdin, not CLI arg"
+
+
+def test_conversation_prompt_embeds_system_prompt():
+    """System prompt should be embedded in the stdin text, not a CLI arg."""
+    from src.core.claude_cli_client import ClaudeCliClient
+    from src.models.claude import ClaudeMessage, ClaudeMessagesRequest
+
+    cfg = _make_config({})
+    client = ClaudeCliClient(cfg)
+
+    request = ClaudeMessagesRequest(
+        model="claude-3-5-sonnet-20241022",
+        max_tokens=100,
+        system="You are a helpful assistant.",
+        messages=[ClaudeMessage(role="user", content="Hello!")],
+    )
+    system_prompt = client._build_system_prompt(request)
+    prompt = client._build_conversation_prompt(request, system_prompt=system_prompt)
+
+    assert "You are a helpful assistant." in prompt
+    assert "Hello!" in prompt
 
 
 def test_classify_cli_error_messages():
