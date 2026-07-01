@@ -265,7 +265,8 @@ def test_build_command_tools_disabled_by_default():
     """By default, --allowedTools '' should disable tools (pure inference)."""
     from src.core.claude_cli_client import ClaudeCliClient
 
-    cfg = _make_config({})  # CLAUDE_CLI_ENABLE_TOOLS defaults to false
+    # Explicitly clear CLAUDE_CLI_ENABLE_TOOLS so the real .env doesn't leak
+    cfg = _make_config({"CLAUDE_CLI_ENABLE_TOOLS": "false"})
     client = ClaudeCliClient(cfg)
 
     cmd = client._build_command("opus", stream=False)
@@ -275,14 +276,23 @@ def test_build_command_tools_disabled_by_default():
 
 
 def test_build_command_tools_enabled():
-    """When CLAUDE_CLI_ENABLE_TOOLS=true, --allowedTools should NOT be present."""
+    """When CLAUDE_CLI_ENABLE_TOOLS=true, tools kept and --append-system-prompt used."""
     from src.core.claude_cli_client import ClaudeCliClient
 
     cfg = _make_config({"CLAUDE_CLI_ENABLE_TOOLS": "true"})
     client = ClaudeCliClient(cfg)
 
+    # Without system prompt
     cmd = client._build_command("opus", stream=False)
     assert "--allowedTools" not in cmd, "Tools should be enabled (no --allowedTools flag)"
+    assert "--append-system-prompt" not in cmd  # No system prompt provided
+
+    # With system prompt → should use --append-system-prompt
+    cmd = client._build_command("opus", stream=False, system_prompt="Be helpful")
+    assert "--allowedTools" not in cmd
+    assert "--append-system-prompt" in cmd
+    idx = cmd.index("--append-system-prompt")
+    assert cmd[idx + 1] == "Be helpful"
 
 
 def test_conversation_prompt_embeds_system_prompt():
