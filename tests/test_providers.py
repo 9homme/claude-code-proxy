@@ -234,18 +234,41 @@ def test_build_command_includes_model_and_stream_flags():
     assert "stream-json" not in non_stream_cmd
 
 
-def test_build_command_no_system_prompt_arg():
-    """The command must NOT pass system prompt via --system-prompt (size limits)."""
+def test_build_command_no_system_persistence_and_append():
+    """Command should use --no-session-persistence and --append-system-prompt."""
     from src.core.claude_cli_client import ClaudeCliClient
 
     cfg = _make_config({})
     client = ClaudeCliClient(cfg)
+
+    # Without system prompt
     cmd = client._build_command("opus", stream=False)
-    assert "--system-prompt" not in cmd, "System prompt must go via stdin, not CLI arg"
+    assert "--no-session-persistence" in cmd
+    assert "--append-system-prompt" not in cmd
+    assert "--system-prompt" not in cmd, "Must not use --system-prompt"
+
+    # With system prompt
+    cmd = client._build_command("opus", stream=False, system_prompt="Be helpful")
+    assert "--no-session-persistence" in cmd
+    idx = cmd.index("--append-system-prompt")
+    assert cmd[idx + 1] == "Be helpful"
 
 
-def test_conversation_prompt_embeds_system_prompt():
-    """System prompt should be embedded in the stdin text, not a CLI arg."""
+def test_build_command_with_session_id():
+    """Command should include --session-id when provided."""
+    from src.core.claude_cli_client import ClaudeCliClient
+
+    cfg = _make_config({})
+    client = ClaudeCliClient(cfg)
+
+    cmd = client._build_command("opus", stream=False, session_id="test-uuid-123")
+    assert "--session-id" in cmd
+    idx = cmd.index("--session-id")
+    assert cmd[idx + 1] == "test-uuid-123"
+
+
+def test_conversation_prompt_excludes_system_prompt():
+    """System prompt should NOT be embedded in stdin text (uses --append-system-prompt)."""
     from src.core.claude_cli_client import ClaudeCliClient
     from src.models.claude import ClaudeMessage, ClaudeMessagesRequest
 
@@ -258,10 +281,11 @@ def test_conversation_prompt_embeds_system_prompt():
         system="You are a helpful assistant.",
         messages=[ClaudeMessage(role="user", content="Hello!")],
     )
-    system_prompt = client._build_system_prompt(request)
-    prompt = client._build_conversation_prompt(request, system_prompt=system_prompt)
+    prompt = client._build_conversation_prompt(request)
 
-    assert "You are a helpful assistant." in prompt
+    # System prompt should NOT be in the conversation text
+    assert "You are a helpful assistant." not in prompt
+    # User message should be
     assert "Hello!" in prompt
 
 
@@ -279,12 +303,16 @@ def test_classify_cli_error_messages():
 
 
 def test_cli_env_strips_anthropic_vars():
-    """_get_cli_env should strip ANTHROPIC_API_KEY/BASE_URL so the CLI uses OAuth."""
+    """_get_cli_env should strip ANTHROPIC_API_KEY/BASE_URL/CLAUDECODE for CLI."""
     from src.core.claude_cli_client import ClaudeCliClient
 
     with patch.dict(
         os.environ,
-        {"ANTHROPIC_API_KEY": "sk-fake", "ANTHROPIC_BASE_URL": "http://localhost:8082"},
+        {
+            "ANTHROPIC_API_KEY": "sk-fake",
+            "ANTHROPIC_BASE_URL": "http://localhost:8082",
+            "CLAUDECODE": "1",
+        },
     ):
         cfg = _make_config({})
         client = ClaudeCliClient(cfg)
@@ -293,3 +321,39 @@ def test_cli_env_strips_anthropic_vars():
     assert "ANTHROPIC_API_KEY" not in env, "ANTHROPIC_API_KEY must be stripped for CLI"
     assert "ANTHROPIC_BASE_URL" not in env, "ANTHROPIC_BASE_URL must be stripped for CLI"
     assert "ANTHROPIC_AUTH_TOKEN" not in env, "ANTHROPIC_AUTH_TOKEN must be stripped for CLI"
+    assert "CLAUDECODE" not in env, "CLAUDECODE must be stripped for CLI"
+
+
+def test_session_manager_single_message_returns_none():
+    """Single-message conversations should not get a session ID."""
+    from src.core.session_manager import SessionManager
+    from src.models.claude import ClaudeMessage
+
+    sm = SessionManager()
+    msgs = [ClaudeMessage(role="user", content="Hello")]
+    assert sm.get_or_create(msgs, "opus") is None
+
+
+def test_session_manager_multi_turn_creates_and_reuses():
+    """Multi-turn conversations should get a session ID, reused on follow-up."""
+    from src.core.session_manager import SessionManager
+    from src.models.claude import ClaudeMessage
+
+    sm = SessionManager()
+    msgs1 = [
+        ClaudeMessage(role="user", content="Hello"),
+        ClaudeMessage(role="assistant", content="Hi there!"),
+        ClaudeMessage(role="user", content="How are you?"),
+    ]
+    session1 = sm.get_or_create(msgs1, "opus")
+    assert session1 is not None
+    assert len(session1) > 0
+
+    # Same conversation prefix → same session
+    msgs2 = [
+        ClaudeMessage(role="user", content="Hello"),
+        ClaudeMessage(role="assistant", content="Hi there!"),
+        ClaudeMessage(role="user", content="What's the weather?"),
+    ]
+    session2 = sm.get_or_create(msgs2, "opus")
+    assert session2 == session1, "Same conversation prefix should reuse session"

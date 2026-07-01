@@ -18,6 +18,7 @@ from src.core.config import Config
 from src.core.constants import Constants
 from src.core.logging import logger
 from src.core.model_target import ModelTarget
+from src.core.session_manager import session_manager
 from src.models.claude import ClaudeMessagesRequest
 
 
@@ -36,6 +37,9 @@ class ClaudeCliClient:
         into the CLI subprocess, the CLI tries to use them for authentication
         instead of the OAuth subscription login. We strip them out so the CLI
         falls back to the keychain/OAuth credentials.
+
+        We also strip CLAUDECODE, which the CLI uses to detect when it's
+        running inside another Claude Code instance.
         """
         env = dict(os.environ)
         # Remove proxy/auth env vars that interfere with the CLI's own auth
@@ -43,6 +47,7 @@ class ClaudeCliClient:
             "ANTHROPIC_API_KEY",
             "ANTHROPIC_BASE_URL",
             "ANTHROPIC_AUTH_TOKEN",
+            "CLAUDECODE",
         ):
             env.pop(key, None)
         return env
@@ -123,31 +128,24 @@ class ClaudeCliClient:
         return base
 
     def _build_conversation_prompt(
-        self, request: ClaudeMessagesRequest, system_prompt: str = ""
+        self, request: ClaudeMessagesRequest
     ) -> str:
         """Flatten Claude messages into a text prompt for the CLI.
 
-        The system prompt is prepended to the conversation text so that the
-        entire payload is passed via stdin (avoiding OS argument length limits
-        when system prompts are large). For single-message conversations the
-        text is passed directly; for multi-turn conversations a transcript is
-        formatted so the model understands the full context.
+        The system prompt is passed separately via --append-system-prompt (see
+        _build_command), so it is NOT embedded here. Only the user/assistant
+        message content is included in the stdin text.
         """
         messages = request.messages
         if not messages:
-            return system_prompt
+            return ""
 
-        # Single user message — pass through directly (with system prefix)
+        # Single user message — pass through directly
         if len(messages) == 1 and messages[0].role == Constants.ROLE_USER:
-            user_text = self._extract_message_text(messages[0])
-            if system_prompt:
-                return f"{system_prompt}\n\n---\n\n{user_text}"
-            return user_text
+            return self._extract_message_text(messages[0])
 
         # Multi-turn: build a labelled transcript
         parts: List[str] = []
-        if system_prompt:
-            parts.append(f"[SYSTEM]\n{system_prompt}")
         for msg in messages:
             role = msg.role.upper()
             text = self._extract_message_text(msg)
@@ -165,19 +163,27 @@ class ClaudeCliClient:
     # ------------------------------------------------------------------
 
     def _build_command(
-        self, model: str, stream: bool
+        self, model: str, stream: bool, system_prompt: str = "",
+        session_id: Optional[str] = None,
     ) -> List[str]:
         """Build the claude CLI command.
 
-        Note: the system prompt is NOT passed via --system-prompt here because
-        large system prompts (common from Claude Code) would exceed OS argument
-        length limits. Instead, the system prompt is embedded into the text
-        that is piped via stdin (see _build_conversation_prompt).
+        The system prompt is passed via --append-system-prompt, which appends
+        to Claude Code's default system prompt. This keeps the model's built-in
+        context while adding our instructions. For very large system prompts,
+        --append-system-prompt may still hit OS arg limits; in that case,
+        callers should embed the system prompt in stdin text instead.
+
+        Session persistence:
+        - --no-session-persistence prevents the CLI from saving sessions to disk
+        - --session-id passes a CLI session UUID for multi-turn context reuse
         """
         cmd: List[str] = [
             self.config.claude_cli_path,
             "-p",
             "--model", model,
+            # Don't save sessions to disk — the proxy manages session IDs
+            "--no-session-persistence",
         ]
 
         if stream:
@@ -188,6 +194,15 @@ class ClaudeCliClient:
             ])
         else:
             cmd.extend(["--output-format", "json"])
+
+        # Pass system prompt via --append-system-prompt (keeps Claude Code's
+        # default system prompt and appends ours)
+        if system_prompt:
+            cmd.extend(["--append-system-prompt", system_prompt])
+
+        # Pass session ID for multi-turn context reuse
+        if session_id:
+            cmd.extend(["--session-id", session_id])
 
         # Disable all built-in tools — we want pure text inference.
         cmd.extend(["--allowedTools", ""])
@@ -211,8 +226,12 @@ class ClaudeCliClient:
     ) -> dict:
         """Run the CLI in non-streaming mode and return a Claude-format dict."""
         system_prompt = self._build_system_prompt(request)
-        prompt = self._build_conversation_prompt(request, system_prompt=system_prompt)
-        cmd = self._build_command(target.model, stream=False)
+        prompt = self._build_conversation_prompt(request)
+        session_id = session_manager.get_or_create(request.messages, target.model)
+        cmd = self._build_command(
+            target.model, stream=False,
+            system_prompt=system_prompt, session_id=session_id,
+        )
 
         start_time = time.time()
         logger.info(f"Claude CLI request started (model: {target.model})")
@@ -384,8 +403,12 @@ class ClaudeCliClient:
     ) -> AsyncGenerator[str, None]:
         """Run the CLI in streaming mode and yield Claude SSE events."""
         system_prompt = self._build_system_prompt(request)
-        prompt = self._build_conversation_prompt(request, system_prompt=system_prompt)
-        cmd = self._build_command(target.model, stream=True)
+        prompt = self._build_conversation_prompt(request)
+        session_id = session_manager.get_or_create(request.messages, target.model)
+        cmd = self._build_command(
+            target.model, stream=True,
+            system_prompt=system_prompt, session_id=session_id,
+        )
 
         start_time = time.time()
         logger.info(f"Claude CLI stream started (model: {target.model})")
