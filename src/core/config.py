@@ -60,6 +60,11 @@ class Config:
         self.claude_cli_skip_permissions = os.environ.get(
             "CLAUDE_CLI_SKIP_PERMISSIONS", "true"
         ).lower() in ("true", "1", "yes")
+        # Allow CLI built-in tools (Bash, Edit, Read, etc.) for agentic behavior.
+        # When false (default), --allowedTools "" disables all tools for pure text inference.
+        self.claude_cli_enable_tools = os.environ.get(
+            "CLAUDE_CLI_ENABLE_TOOLS", "false"
+        ).lower() in ("true", "1", "yes")
         
     def validate_api_key(self):
         """Basic API key validation"""

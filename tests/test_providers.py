@@ -234,24 +234,18 @@ def test_build_command_includes_model_and_stream_flags():
     assert "stream-json" not in non_stream_cmd
 
 
-def test_build_command_no_system_persistence_and_append():
-    """Command should use --no-session-persistence and --append-system-prompt."""
+def test_build_command_no_session_persistence():
+    """Command should use --no-session-persistence."""
     from src.core.claude_cli_client import ClaudeCliClient
 
     cfg = _make_config({})
     client = ClaudeCliClient(cfg)
 
-    # Without system prompt
     cmd = client._build_command("opus", stream=False)
     assert "--no-session-persistence" in cmd
+    # Must not use --system-prompt or --append-system-prompt
+    assert "--system-prompt" not in cmd
     assert "--append-system-prompt" not in cmd
-    assert "--system-prompt" not in cmd, "Must not use --system-prompt"
-
-    # With system prompt
-    cmd = client._build_command("opus", stream=False, system_prompt="Be helpful")
-    assert "--no-session-persistence" in cmd
-    idx = cmd.index("--append-system-prompt")
-    assert cmd[idx + 1] == "Be helpful"
 
 
 def test_build_command_with_session_id():
@@ -267,8 +261,32 @@ def test_build_command_with_session_id():
     assert cmd[idx + 1] == "test-uuid-123"
 
 
-def test_conversation_prompt_excludes_system_prompt():
-    """System prompt should NOT be embedded in stdin text (uses --append-system-prompt)."""
+def test_build_command_tools_disabled_by_default():
+    """By default, --allowedTools '' should disable tools (pure inference)."""
+    from src.core.claude_cli_client import ClaudeCliClient
+
+    cfg = _make_config({})  # CLAUDE_CLI_ENABLE_TOOLS defaults to false
+    client = ClaudeCliClient(cfg)
+
+    cmd = client._build_command("opus", stream=False)
+    assert "--allowedTools" in cmd
+    idx = cmd.index("--allowedTools")
+    assert cmd[idx + 1] == ""
+
+
+def test_build_command_tools_enabled():
+    """When CLAUDE_CLI_ENABLE_TOOLS=true, --allowedTools should NOT be present."""
+    from src.core.claude_cli_client import ClaudeCliClient
+
+    cfg = _make_config({"CLAUDE_CLI_ENABLE_TOOLS": "true"})
+    client = ClaudeCliClient(cfg)
+
+    cmd = client._build_command("opus", stream=False)
+    assert "--allowedTools" not in cmd, "Tools should be enabled (no --allowedTools flag)"
+
+
+def test_conversation_prompt_embeds_system_prompt():
+    """System prompt should be embedded in the stdin text."""
     from src.core.claude_cli_client import ClaudeCliClient
     from src.models.claude import ClaudeMessage, ClaudeMessagesRequest
 
@@ -281,11 +299,11 @@ def test_conversation_prompt_excludes_system_prompt():
         system="You are a helpful assistant.",
         messages=[ClaudeMessage(role="user", content="Hello!")],
     )
-    prompt = client._build_conversation_prompt(request)
+    system_prompt = client._build_system_prompt(request)
+    prompt = client._build_conversation_prompt(request, system_prompt=system_prompt)
 
-    # System prompt should NOT be in the conversation text
-    assert "You are a helpful assistant." not in prompt
-    # User message should be
+    # System prompt SHOULD be in the conversation text
+    assert "You are a helpful assistant." in prompt
     assert "Hello!" in prompt
 
 

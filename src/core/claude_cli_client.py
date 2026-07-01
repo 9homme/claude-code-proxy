@@ -128,24 +128,33 @@ class ClaudeCliClient:
         return base
 
     def _build_conversation_prompt(
-        self, request: ClaudeMessagesRequest
+        self, request: ClaudeMessagesRequest, system_prompt: str = ""
     ) -> str:
         """Flatten Claude messages into a text prompt for the CLI.
 
-        The system prompt is passed separately via --append-system-prompt (see
-        _build_command), so it is NOT embedded here. Only the user/assistant
-        message content is included in the stdin text.
+        The system prompt is embedded directly in the stdin text rather than
+        passed via --system-prompt or --append-system-prompt. This avoids two
+        problems:
+        1. OS argument length limits with large system prompts
+        2. --append-system-prompt keeps Claude Code's default system prompt
+           which describes built-in tools (Bash, Edit, etc.). When tools are
+           disabled, the model gets confused and produces unparseable tool calls.
         """
         messages = request.messages
         if not messages:
-            return ""
+            return system_prompt
 
-        # Single user message — pass through directly
+        # Single user message — pass through directly (with system prefix)
         if len(messages) == 1 and messages[0].role == Constants.ROLE_USER:
-            return self._extract_message_text(messages[0])
+            user_text = self._extract_message_text(messages[0])
+            if system_prompt:
+                return f"{system_prompt}\n\n---\n\n{user_text}"
+            return user_text
 
         # Multi-turn: build a labelled transcript
         parts: List[str] = []
+        if system_prompt:
+            parts.append(f"[SYSTEM]\n{system_prompt}")
         for msg in messages:
             role = msg.role.upper()
             text = self._extract_message_text(msg)
@@ -168,15 +177,17 @@ class ClaudeCliClient:
     ) -> List[str]:
         """Build the claude CLI command.
 
-        The system prompt is passed via --append-system-prompt, which appends
-        to Claude Code's default system prompt. This keeps the model's built-in
-        context while adding our instructions. For very large system prompts,
-        --append-system-prompt may still hit OS arg limits; in that case,
-        callers should embed the system prompt in stdin text instead.
+        By default this is a transparent passthrough — the CLI keeps its
+        default system prompt, built-in tools, and full Claude Code behavior.
+        This makes Claude Code work seamlessly as if it's calling the real API.
 
-        Session persistence:
-        - --no-session-persistence prevents the CLI from saving sessions to disk
-        - --session-id passes a CLI session UUID for multi-turn context reuse
+        The system_prompt parameter is only used when CLAUDE_CLI_ENABLE_TOOLS
+        is false (pure inference mode). In transparent mode, the system prompt
+        is passed via stdin so the CLI's default behavior is preserved.
+
+        Config options:
+        - CLAUDE_CLI_ENABLE_TOOLS=false: --allowedTools "" for pure inference
+        - CLAUDE_CLI_SKIP_PERMISSIONS=true: --dangerously-skip-permissions
         """
         cmd: List[str] = [
             self.config.claude_cli_path,
@@ -195,17 +206,15 @@ class ClaudeCliClient:
         else:
             cmd.extend(["--output-format", "json"])
 
-        # Pass system prompt via --append-system-prompt (keeps Claude Code's
-        # default system prompt and appends ours)
-        if system_prompt:
-            cmd.extend(["--append-system-prompt", system_prompt])
-
         # Pass session ID for multi-turn context reuse
         if session_id:
             cmd.extend(["--session-id", session_id])
 
-        # Disable all built-in tools — we want pure text inference.
-        cmd.extend(["--allowedTools", ""])
+        # Only disable tools in pure inference mode (default).
+        # When CLAUDE_CLI_ENABLE_TOOLS=true, the CLI keeps all its built-in
+        # tools (Bash, Edit, Read, etc.) for full agentic behavior.
+        if not self.config.claude_cli_enable_tools:
+            cmd.extend(["--allowedTools", ""])
 
         if self.config.claude_cli_skip_permissions:
             cmd.append("--dangerously-skip-permissions")
@@ -226,7 +235,7 @@ class ClaudeCliClient:
     ) -> dict:
         """Run the CLI in non-streaming mode and return a Claude-format dict."""
         system_prompt = self._build_system_prompt(request)
-        prompt = self._build_conversation_prompt(request)
+        prompt = self._build_conversation_prompt(request, system_prompt=system_prompt)
         session_id = session_manager.get_or_create(request.messages, target.model)
         cmd = self._build_command(
             target.model, stream=False,
@@ -403,7 +412,7 @@ class ClaudeCliClient:
     ) -> AsyncGenerator[str, None]:
         """Run the CLI in streaming mode and yield Claude SSE events."""
         system_prompt = self._build_system_prompt(request)
-        prompt = self._build_conversation_prompt(request)
+        prompt = self._build_conversation_prompt(request, system_prompt=system_prompt)
         session_id = session_manager.get_or_create(request.messages, target.model)
         cmd = self._build_command(
             target.model, stream=True,
