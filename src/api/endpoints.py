@@ -7,6 +7,7 @@ from typing import Optional
 from src.core.config import config
 from src.core.logging import logger
 from src.core.client import OpenAIClient
+from src.core.claude_cli_client import ClaudeCliClient
 from src.models.claude import ClaudeMessagesRequest, ClaudeTokenCountRequest, ClaudeModelsResponse, ClaudeModelInfo
 from src.conversion.request_converter import convert_claude_to_openai
 from src.conversion.response_converter import (
@@ -25,6 +26,33 @@ openai_client = OpenAIClient(
     api_version=config.azure_api_version,
     custom_headers=custom_headers,
 )
+
+claude_cli_client = ClaudeCliClient(config)
+
+
+def _build_cli_error_response(e: HTTPException) -> dict:
+    """Build an Anthropic-style error response from a CLI HTTPException.
+
+    When the CLI client raises an HTTPException, the detail may be either a
+    plain string (for internal errors) or a dict with 'error_type' and
+    'message' keys (for mapped Anthropic-style errors like rate_limit_error).
+    """
+    detail = e.detail
+    if isinstance(detail, dict) and "error_type" in detail:
+        return {
+            "type": "error",
+            "error": {
+                "type": detail["error_type"],
+                "message": detail.get("message", str(detail)),
+            },
+        }
+    # Fallback for non-dict details (string errors)
+    error_message = claude_cli_client.classify_cli_error(detail)
+    return {
+        "type": "error",
+        "error": {"type": "api_error", "message": error_message},
+    }
+
 
 async def validate_api_key(x_api_key: Optional[str] = Header(None), authorization: Optional[str] = Header(None)):
     """Validate the client's API key from either x-api-key header or Authorization header."""
@@ -58,21 +86,55 @@ async def create_message(request: ClaudeMessagesRequest, http_request: Request, 
         # Generate unique request ID for cancellation tracking
         request_id = str(uuid.uuid4())
 
-        # Get model-specific configuration
-        openai_model, api_key, base_url = model_manager.get_model_config(request.model)
-
-        # Convert Claude request to OpenAI format
-        openai_request = convert_claude_to_openai(request, model_manager)
+        # Resolve routing target for the requested model
+        target = model_manager.get_model_config(request.model)
+        logger.info(
+            f"Routing model='{request.model}' -> provider='{target.provider}', backend_model='{target.model}'"
+        )
 
         # Check if client disconnected before processing
         if await http_request.is_disconnected():
             raise HTTPException(status_code=499, detail="Client disconnected")
 
+        # ------------------------------------------------------------------
+        # claude-cli backend
+        # ------------------------------------------------------------------
+        if target.is_claude_cli:
+            if request.stream:
+                try:
+                    return StreamingResponse(
+                        claude_cli_client.create_streaming_completion(
+                            request, target, request_id
+                        ),
+                        media_type="text/event-stream",
+                        headers={
+                            "Cache-Control": "no-cache",
+                            "Connection": "keep-alive",
+                            "Access-Control-Allow-Origin": "*",
+                            "Access-Control-Allow-Headers": "*",
+                        },
+                    )
+                except HTTPException as e:
+                    logger.error(f"Claude CLI streaming error: {e.detail}")
+                    error_response = _build_cli_error_response(e)
+                    return JSONResponse(
+                        status_code=e.status_code, content=error_response
+                    )
+            else:
+                return await claude_cli_client.create_completion(
+                    request, target, request_id
+                )
+
+        # ------------------------------------------------------------------
+        # openai backend (default / original flow)
+        # ------------------------------------------------------------------
+        openai_request = convert_claude_to_openai(request, model_manager)
+
         if request.stream:
             # Streaming response - wrap in error handling
             try:
                 openai_stream = openai_client.create_chat_completion_stream(
-                    openai_request, api_key, base_url, request_id
+                    openai_request, target.api_key, target.base_url, request_id
                 )
                 return StreamingResponse(
                     convert_openai_streaming_to_claude_with_cancellation(
@@ -106,7 +168,7 @@ async def create_message(request: ClaudeMessagesRequest, http_request: Request, 
         else:
             # Non-streaming response
             openai_response = await openai_client.create_chat_completion(
-                openai_request, api_key, base_url, request_id
+                openai_request, target.api_key, target.base_url, request_id
             )
             claude_response = convert_openai_to_claude_response(
                 openai_response, request
@@ -204,29 +266,45 @@ async def health_check():
         "openai_api_configured": bool(config.openai_api_key),
         "api_key_valid": config.validate_api_key(),
         "client_api_key_validation": bool(config.anthropic_api_key),
+        "providers": {
+            "big": config.big_model_provider,
+            "middle": config.middle_model_provider,
+            "small": config.small_model_provider,
+        },
     }
 
 
 @router.get("/test-connection")
 async def test_connection():
-    """Test API connectivity to OpenAI"""
+    """Test API connectivity to the configured backend."""
     try:
-        # Simple test request to verify API connectivity
-        openai_model, api_key, base_url = model_manager.get_model_config(config.small_model)
+        # Resolve the small-model tier to test connectivity
+        target = model_manager.get_model_config("claude-3-5-haiku-20241022")
+
+        if target.is_claude_cli:
+            return {
+                "status": "success",
+                "message": "Claude CLI backend configured",
+                "provider": target.provider,
+                "model_used": target.model,
+                "timestamp": datetime.now().isoformat(),
+            }
+
         test_response = await openai_client.create_chat_completion(
             {
-                "model": openai_model,
+                "model": target.model,
                 "messages": [{"role": "user", "content": "Hello"}],
                 "max_tokens": 5,
             },
-            api_key,
-            base_url
+            target.api_key,
+            target.base_url,
         )
 
         return {
             "status": "success",
             "message": "Successfully connected to OpenAI API",
-            "model_used": openai_model,
+            "provider": target.provider,
+            "model_used": target.model,
             "timestamp": datetime.now().isoformat(),
             "response_id": test_response.get("id", "unknown"),
         }
@@ -262,8 +340,11 @@ async def root():
             "api_key_configured": bool(config.openai_api_key),
             "client_api_key_validation": bool(config.anthropic_api_key),
             "big_model": config.big_model,
+            "big_model_provider": config.big_model_provider,
             "middle_model": config.middle_model,
+            "middle_model_provider": config.middle_model_provider,
             "small_model": config.small_model,
+            "small_model_provider": config.small_model_provider,
         },
         "endpoints": {
             "messages": "/v1/messages",

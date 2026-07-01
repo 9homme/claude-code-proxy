@@ -8,6 +8,7 @@ A proxy server that enables **Claude Code** to work with OpenAI-compatible API p
 
 - **Full Claude API Compatibility**: Complete `/v1/messages` endpoint support
 - **Multiple Provider Support**: OpenAI, Azure OpenAI, local models (Ollama), and any OpenAI-compatible API
+- **Claude Code CLI Backend**: Use your Claude Code Max subscription side-by-side with other providers — configure each tier (BIG/MIDDLE/SMALL) independently
 - **Smart Model Mapping**: Configure BIG and SMALL models via environment variables
 - **Function Calling**: Complete tool use support with proper conversion
 - **Streaming Responses**: Real-time SSE streaming support
@@ -226,6 +227,58 @@ SMALL_MODEL_API_KEY="sk-provider-b-key"
 SMALL_MODEL_BASE_URL="https://api.provider-b.com/v1"
 SMALL_MODEL="glm-4-flash"
 ```
+
+#### Claude Code CLI Provider (Claude Code Max subscription)
+
+In addition to OpenAI-compatible providers, each tier can be served by the
+**Claude Code CLI** using your Claude Code Max subscription. This lets you mix
+your subscription with other providers.
+
+First, make sure the CLI is installed and authenticated:
+
+```bash
+claude auth   # log in with your Claude Code subscription
+```
+
+Then set `*_MODEL_PROVIDER="claude-cli"` for the tiers you want to route to the
+CLI. The tier's `*_MODEL` value is passed to the CLI as `claude --model`, so you
+can use aliases (`opus`, `sonnet`, `haiku`) or full model names.
+
+```bash
+# Route every tier to your Claude Code Max subscription
+BIG_MODEL_PROVIDER="claude-cli"
+BIG_MODEL="opus"
+MIDDLE_MODEL_PROVIDER="claude-cli"
+MIDDLE_MODEL="sonnet"
+SMALL_MODEL_PROVIDER="claude-cli"
+SMALL_MODEL="haiku"
+```
+
+**Mixed providers** — the main use case for this feature:
+
+```bash
+# Big tier -> Claude Code Max (via CLI)
+BIG_MODEL_PROVIDER="claude-cli"
+BIG_MODEL="opus"
+
+# Middle tier -> OpenAI
+MIDDLE_MODEL_PROVIDER="openai"
+MIDDLE_MODEL="gpt-4o"
+
+# Small tier -> local model
+SMALL_MODEL_PROVIDER="openai"
+SMALL_MODEL="llama3.1:8b"
+SMALL_MODEL_BASE_URL="http://localhost:11434/v1"
+```
+
+Claude CLI backend settings:
+
+| Variable | Default | Description |
+| --- | --- | --- |
+| `CLAUDE_CLI_PATH` | `claude` | Path to the `claude` executable |
+| `CLAUDE_CLI_EXTRA_ARGS` | _empty_ | Comma-separated extra CLI flags |
+| `CLAUDE_CLI_TIMEOUT` | `600` | Per-request timeout in seconds |
+| `CLAUDE_CLI_SKIP_PERMISSIONS` | `true` | Pass `--dangerously-skip-permissions` |
 
 #### Other Providers
 

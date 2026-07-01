@@ -35,16 +35,31 @@ class Config:
         self.big_model = os.environ.get("BIG_MODEL", "gpt-4o")
         self.middle_model = os.environ.get("MIDDLE_MODEL", self.big_model)
         self.small_model = os.environ.get("SMALL_MODEL", "gpt-4o-mini")
-        
+
         # Per-model configuration
         self.big_model_api_key = os.environ.get("BIG_MODEL_API_KEY", self.openai_api_key)
         self.big_model_base_url = os.environ.get("BIG_MODEL_BASE_URL", self.openai_base_url)
-        
+
         self.middle_model_api_key = os.environ.get("MIDDLE_MODEL_API_KEY", self.openai_api_key)
         self.middle_model_base_url = os.environ.get("MIDDLE_MODEL_BASE_URL", self.openai_base_url)
-        
+
         self.small_model_api_key = os.environ.get("SMALL_MODEL_API_KEY", self.openai_api_key)
         self.small_model_base_url = os.environ.get("SMALL_MODEL_BASE_URL", self.openai_base_url)
+
+        # Per-model provider selection ("openai" or "claude-cli")
+        self.big_model_provider = os.environ.get("BIG_MODEL_PROVIDER", "openai").lower()
+        self.middle_model_provider = os.environ.get("MIDDLE_MODEL_PROVIDER", "openai").lower()
+        self.small_model_provider = os.environ.get("SMALL_MODEL_PROVIDER", "openai").lower()
+
+        # Claude CLI backend settings
+        self.claude_cli_path = os.environ.get("CLAUDE_CLI_PATH", "claude")
+        self.claude_cli_extra_args = [
+            a.strip() for a in os.environ.get("CLAUDE_CLI_EXTRA_ARGS", "").split(",") if a.strip()
+        ]
+        self.claude_cli_timeout = int(os.environ.get("CLAUDE_CLI_TIMEOUT", "600"))
+        self.claude_cli_skip_permissions = os.environ.get(
+            "CLAUDE_CLI_SKIP_PERMISSIONS", "true"
+        ).lower() in ("true", "1", "yes")
         
     def validate_api_key(self):
         """Basic API key validation"""

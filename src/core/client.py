@@ -92,8 +92,15 @@ class OpenAIClient:
             duration = time.time() - start_time
             logger.info(f"LLM request completed in {duration:.2f}s (model: {request.get('model')})")
             
+            comp_dict = completion.model_dump()
+            try:
+                with open("last_openai_response.json", "w", encoding="utf-8") as f:
+                    json.dump(comp_dict, f, indent=2, ensure_ascii=False)
+            except Exception as e_log:
+                logger.error(f"Failed to write last_openai_response.json: {e_log}")
+            
             # Convert to dict format that matches the original interface
-            return completion.model_dump()
+            return comp_dict
         
         except AuthenticationError as e:
             raise HTTPException(status_code=401, detail=self.classify_openai_error(str(e)))
@@ -133,6 +140,8 @@ class OpenAIClient:
             # Create the streaming completion
             streaming_completion = await client.chat.completions.create(**request)
             
+            streamed_chunks = []
+            
             async for chunk in streaming_completion:
                 if not ttft_logged:
                     ttft = time.time() - start_time
@@ -146,11 +155,18 @@ class OpenAIClient:
                 
                 # Convert chunk to SSE format matching original HTTP client format
                 chunk_dict = chunk.model_dump()
+                streamed_chunks.append(chunk_dict)
                 chunk_json = json.dumps(chunk_dict, ensure_ascii=False)
                 yield f"data: {chunk_json}"
             
             duration = time.time() - start_time
             logger.info(f"LLM stream completed in {duration:.2f}s (model: {request.get('model')})")
+            
+            try:
+                with open("last_openai_response_stream.json", "w", encoding="utf-8") as f:
+                    json.dump(streamed_chunks, f, indent=2, ensure_ascii=False)
+            except Exception as e_log:
+                logger.error(f"Failed to write last_openai_response_stream.json: {e_log}")
             
             # Signal end of stream
             yield "data: [DONE]"

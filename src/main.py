@@ -49,17 +49,32 @@ def main():
     print("")
     print("📋 Model Tier Configuration:")
     print(f"   BIG (opus):")
+    print(f"     Provider: {config.big_model_provider}")
     print(f"     Model:    {config.big_model}")
-    print(f"     Base URL: {config.big_model_base_url}")
-    print(f"     API Key:  {config.mask_api_key(config.big_model_api_key)}")
+    if config.big_model_provider == "openai":
+        print(f"     Base URL: {config.big_model_base_url}")
+        print(f"     API Key:  {config.mask_api_key(config.big_model_api_key)}")
     print(f"   MIDDLE (sonnet):")
+    print(f"     Provider: {config.middle_model_provider}")
     print(f"     Model:    {config.middle_model}")
-    print(f"     Base URL: {config.middle_model_base_url}")
-    print(f"     API Key:  {config.mask_api_key(config.middle_model_api_key)}")
+    if config.middle_model_provider == "openai":
+        print(f"     Base URL: {config.middle_model_base_url}")
+        print(f"     API Key:  {config.mask_api_key(config.middle_model_api_key)}")
     print(f"   SMALL (haiku):")
+    print(f"     Provider: {config.small_model_provider}")
     print(f"     Model:    {config.small_model}")
-    print(f"     Base URL: {config.small_model_base_url}")
-    print(f"     API Key:  {config.mask_api_key(config.small_model_api_key)}")
+    if config.small_model_provider == "openai":
+        print(f"     Base URL: {config.small_model_base_url}")
+        print(f"     API Key:  {config.mask_api_key(config.small_model_api_key)}")
+    if any([config.big_model_provider == "claude-cli",
+            config.middle_model_provider == "claude-cli",
+            config.small_model_provider == "claude-cli"]):
+        print("")
+        print("🔧 Claude CLI Backend:")
+        print(f"     CLI Path: {config.claude_cli_path}")
+        print(f"     Timeout:  {config.claude_cli_timeout}s")
+        if config.claude_cli_extra_args:
+            print(f"     Extra Args: {' '.join(config.claude_cli_extra_args)}")
     print("")
 
     # Parse log level - extract just the first word to handle comments

@@ -1,0 +1,264 @@
+"""Tests for provider routing (openai vs claude-cli) and CLI result conversion."""
+
+import os
+import pytest
+from unittest.mock import patch, MagicMock
+
+# Ensure required env vars exist before importing Config
+os.environ.setdefault("OPENAI_API_KEY", "sk-test")
+
+
+def _make_config(overrides: dict, clear_providers: bool = False) -> "Config":
+    """Build a Config instance with the given env overrides applied.
+
+    When clear_providers is True, provider env vars are removed first so the
+    real .env doesn't leak into default-provider tests.
+    """
+    from src.core.config import Config
+
+    env = dict(os.environ)
+    if clear_providers:
+        for var in (
+            "BIG_MODEL_PROVIDER",
+            "MIDDLE_MODEL_PROVIDER",
+            "SMALL_MODEL_PROVIDER",
+        ):
+            env.pop(var, None)
+    env.update(overrides)
+
+    with patch.dict(os.environ, env, clear=True):
+        return Config()
+
+
+def test_default_providers_are_openai():
+    """Without provider env vars, all tiers default to the openai provider."""
+    from src.core.model_target import PROVIDER_OPENAI
+
+    cfg = _make_config({}, clear_providers=True)
+    from src.core.model_manager import ModelManager
+
+    manager = ModelManager(cfg)
+    for model in ["claude-3-opus-20240229", "claude-3-5-sonnet-20241022", "claude-3-5-haiku-20241022"]:
+        target = manager.get_model_config(model)
+        assert target.provider == PROVIDER_OPENAI, f"{model} should default to openai"
+
+
+def test_claude_cli_provider_selected_per_tier():
+    """Setting *_MODEL_PROVIDER=claude-cli routes that tier to the CLI."""
+    from src.core.model_target import PROVIDER_CLAUDE_CLI
+
+    cfg = _make_config(
+        {
+            "BIG_MODEL_PROVIDER": "claude-cli",
+            "BIG_MODEL": "opus",
+            "MIDDLE_MODEL_PROVIDER": "claude-cli",
+            "MIDDLE_MODEL": "sonnet",
+            "SMALL_MODEL_PROVIDER": "claude-cli",
+            "SMALL_MODEL": "haiku",
+        }
+    )
+    from src.core.model_manager import ModelManager
+
+    manager = ModelManager(cfg)
+
+    opus_target = manager.get_model_config("claude-3-opus-20240229")
+    assert opus_target.is_claude_cli
+    assert opus_target.model == "opus"
+
+    sonnet_target = manager.get_model_config("claude-3-5-sonnet-20241022")
+    assert sonnet_target.is_claude_cli
+    assert sonnet_target.model == "sonnet"
+
+    haiku_target = manager.get_model_config("claude-3-5-haiku-20241022")
+    assert haiku_target.is_claude_cli
+    assert haiku_target.model == "haiku"
+
+
+def test_mixed_providers():
+    """Mixing providers across tiers resolves correctly."""
+    from src.core.model_target import PROVIDER_OPENAI, PROVIDER_CLAUDE_CLI
+
+    cfg = _make_config(
+        {
+            "BIG_MODEL_PROVIDER": "claude-cli",
+            "BIG_MODEL": "opus",
+            "MIDDLE_MODEL_PROVIDER": "openai",
+            "MIDDLE_MODEL": "gpt-4o",
+            "SMALL_MODEL_PROVIDER": "openai",
+            "SMALL_MODEL": "gpt-4o-mini",
+        }
+    )
+    from src.core.model_manager import ModelManager
+
+    manager = ModelManager(cfg)
+
+    big = manager.get_model_config("claude-3-opus-20240229")
+    assert big.provider == PROVIDER_CLAUDE_CLI
+    assert big.is_claude_cli
+
+    middle = manager.get_model_config("claude-3-5-sonnet-20241022")
+    assert middle.provider == PROVIDER_OPENAI
+    assert middle.is_openai
+
+    small = manager.get_model_config("claude-3-5-haiku-20241022")
+    assert small.provider == PROVIDER_OPENAI
+
+
+def test_map_claude_model_to_openai_returns_model_name():
+    """The compatibility helper should still return a model name string."""
+    cfg = _make_config({})
+    from src.core.model_manager import ModelManager
+
+    manager = ModelManager(cfg)
+    assert isinstance(manager.map_claude_model_to_openai("claude-3-opus-20240229"), str)
+
+
+def test_cli_result_to_claude_response_success():
+    """A successful CLI result is converted to a Claude Messages response."""
+    from src.core.claude_cli_client import ClaudeCliClient
+    from src.models.claude import ClaudeMessagesRequest
+
+    cfg = _make_config({})
+    client = ClaudeCliClient(cfg)
+
+    cli_result = {
+        "type": "result",
+        "is_error": False,
+        "result": "Hello there!",
+        "stop_reason": "end_turn",
+        "usage": {"input_tokens": 10, "output_tokens": 3},
+    }
+    request = ClaudeMessagesRequest(model="claude-3-opus-20240229", max_tokens=100, messages=[])
+
+    response = client._result_to_claude_response(cli_result, request)
+    assert response["type"] == "message"
+    assert response["role"] == "assistant"
+    assert response["content"] == [{"type": "text", "text": "Hello there!"}]
+    assert response["usage"] == {"input_tokens": 10, "output_tokens": 3}
+    assert response["stop_reason"] == "end_turn"
+
+
+def test_cli_result_to_claude_response_error_raises():
+    """A CLI-level error result should raise an HTTPException with type info."""
+    from fastapi import HTTPException
+    from src.core.claude_cli_client import ClaudeCliClient
+    from src.models.claude import ClaudeMessagesRequest
+
+    cfg = _make_config({})
+    client = ClaudeCliClient(cfg)
+
+    cli_result = {
+        "type": "result",
+        "is_error": True,
+        "api_error_status": 429,
+        "result": "You've hit your session limit",
+    }
+    request = ClaudeMessagesRequest(model="claude-3-opus-20240229", max_tokens=100, messages=[])
+
+    with pytest.raises(HTTPException) as exc_info:
+        client._result_to_claude_response(cli_result, request)
+    assert exc_info.value.status_code == 429
+    # The detail should be a dict with Anthropic-style error info
+    detail = exc_info.value.detail
+    assert isinstance(detail, dict)
+    assert detail["error_type"] == "rate_limit_error"
+    assert "session limit" in detail["message"]
+
+
+def test_classify_cli_error_types():
+    """_classify_cli_error maps common CLI errors to Anthropic error types."""
+    from src.core.claude_cli_client import ClaudeCliClient
+
+    cfg = _make_config({})
+    client = ClaudeCliClient(cfg)
+
+    # Rate limit / session limit
+    err = client._classify_cli_error(
+        {"is_error": True, "api_error_status": 429, "result": "session limit reached"}
+    )
+    assert err["error_type"] == "rate_limit_error"
+    assert err["status_code"] == 429
+
+    # Auth error
+    err = client._classify_cli_error(
+        {"is_error": True, "api_error_status": 401, "result": "Invalid API key"}
+    )
+    assert err["error_type"] == "authentication_error"
+    assert err["status_code"] == 401
+
+    # Bad request
+    err = client._classify_cli_error(
+        {"is_error": True, "api_error_status": 400, "result": "Bad input"}
+    )
+    assert err["error_type"] == "invalid_request_error"
+    assert err["status_code"] == 400
+
+    # Overloaded
+    err = client._classify_cli_error(
+        {"is_error": True, "api_error_status": 503, "result": "Overloaded"}
+    )
+    assert err["error_type"] == "overloaded_error"
+    assert err["status_code"] == 503
+
+
+def test_sse_error_typed():
+    """_sse_error_typed should produce Anthropic-style error SSE events."""
+    import json
+    from src.core.claude_cli_client import ClaudeCliClient
+
+    sse = ClaudeCliClient._sse_error_typed("rate_limit_error", "session limit reached")
+    assert sse.startswith("event: error\n")
+    # Parse the data line
+    data_line = sse.split("\n")[1].replace("data: ", "")
+    parsed = json.loads(data_line)
+    assert parsed["type"] == "error"
+    assert parsed["error"]["type"] == "rate_limit_error"
+    assert parsed["error"]["message"] == "session limit reached"
+
+
+def test_build_command_includes_model_and_stream_flags():
+    """The constructed CLI command should include model + format flags."""
+    from src.core.claude_cli_client import ClaudeCliClient
+
+    cfg = _make_config({})
+    client = ClaudeCliClient(cfg)
+
+    stream_cmd = client._build_command("sonnet", stream=True, system_prompt="hi")
+    assert "--model" in stream_cmd
+    assert "sonnet" in stream_cmd
+    assert "--output-format" in stream_cmd
+    assert "stream-json" in stream_cmd
+
+    non_stream_cmd = client._build_command("opus", stream=False, system_prompt="hi")
+    assert "json" in non_stream_cmd
+    assert "stream-json" not in non_stream_cmd
+
+
+def test_classify_cli_error_messages():
+    """classify_cli_error should return friendly messages for known failures."""
+    from src.core.claude_cli_client import ClaudeCliClient
+
+    cfg = _make_config({})
+    client = ClaudeCliClient(cfg)
+
+    assert "rate" in client.classify_cli_error("You've hit your session limit").lower()
+    assert "authenticated" in client.classify_cli_error("not logged in").lower()
+    assert "not found" in client.classify_cli_error("command not found").lower()
+    assert "auth conflict" in client.classify_cli_error("Invalid API key · Fix external API key").lower()
+
+
+def test_cli_env_strips_anthropic_vars():
+    """_get_cli_env should strip ANTHROPIC_API_KEY/BASE_URL so the CLI uses OAuth."""
+    from src.core.claude_cli_client import ClaudeCliClient
+
+    with patch.dict(
+        os.environ,
+        {"ANTHROPIC_API_KEY": "sk-fake", "ANTHROPIC_BASE_URL": "http://localhost:8082"},
+    ):
+        cfg = _make_config({})
+        client = ClaudeCliClient(cfg)
+        env = client._get_cli_env()
+
+    assert "ANTHROPIC_API_KEY" not in env, "ANTHROPIC_API_KEY must be stripped for CLI"
+    assert "ANTHROPIC_BASE_URL" not in env, "ANTHROPIC_BASE_URL must be stripped for CLI"
+    assert "ANTHROPIC_AUTH_TOKEN" not in env, "ANTHROPIC_AUTH_TOKEN must be stripped for CLI"
