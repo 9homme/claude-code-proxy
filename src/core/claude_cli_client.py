@@ -416,6 +416,18 @@ class ClaudeCliClient:
         }
         stop_reason = stop_reason_map.get(stop_reason_raw, Constants.STOP_END_TURN)
 
+        usage_out: Dict[str, Any] = {
+            "input_tokens": usage.get("input_tokens", 0),
+            "output_tokens": usage.get("output_tokens", 0),
+        }
+        # Forward Anthropic prompt-cache usage fields if the CLI provides them.
+        cache_read = usage.get("cache_read_input_tokens")
+        cache_creation = usage.get("cache_creation_input_tokens")
+        if cache_read:
+            usage_out["cache_read_input_tokens"] = cache_read
+        if cache_creation:
+            usage_out["cache_creation_input_tokens"] = cache_creation
+
         return {
             "id": f"msg_{uuid.uuid4().hex[:24]}",
             "type": "message",
@@ -424,10 +436,7 @@ class ClaudeCliClient:
             "content": [{"type": Constants.CONTENT_TEXT, "text": text}],
             "stop_reason": stop_reason,
             "stop_sequence": None,
-            "usage": {
-                "input_tokens": usage.get("input_tokens", 0),
-                "output_tokens": usage.get("output_tokens", 0),
-            },
+            "usage": usage_out,
         }
 
     # ------------------------------------------------------------------
@@ -561,6 +570,12 @@ class ClaudeCliClient:
                             usage_data["output_tokens"] = inner_usage.get(
                                 "output_tokens", usage_data.get("output_tokens", 0)
                             )
+                            for cache_key in (
+                                "cache_read_input_tokens",
+                                "cache_creation_input_tokens",
+                            ):
+                                if inner_usage.get(cache_key):
+                                    usage_data[cache_key] = inner_usage[cache_key]
 
                 # Handle the final result event
                 elif event_type == "result":
@@ -579,6 +594,12 @@ class ClaudeCliClient:
                         usage_data["output_tokens"] = r_usage.get(
                             "output_tokens", usage_data.get("output_tokens", 0)
                         )
+                        for cache_key in (
+                            "cache_read_input_tokens",
+                            "cache_creation_input_tokens",
+                        ):
+                            if r_usage.get(cache_key):
+                                usage_data[cache_key] = r_usage[cache_key]
 
                     sr = event.get("stop_reason", "")
                     if sr == "max_tokens":
